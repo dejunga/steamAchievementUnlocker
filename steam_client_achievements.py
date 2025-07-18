@@ -20,6 +20,10 @@ class SteamAchievementManager:
     Steam Achievement Manager following the working C# implementation approach
     Uses steamclient.dll and proper Steam client interface hierarchy
     """
+    
+    # Class-level cache for DLL path to avoid repeated searches
+    _cached_dll_path = None
+    _cached_steam_path = None
 
     def __init__(self, app_id):
         self.app_id = str(app_id)
@@ -32,7 +36,11 @@ class SteamAchievementManager:
         self._initialize_steam(app_id)
 
     def _get_steam_install_path(self):
-        """Get Steam installation path from Windows registry"""
+        """Get Steam installation path from Windows registry (with caching)"""
+        # Use cached path if available
+        if SteamAchievementManager._cached_steam_path:
+            return SteamAchievementManager._cached_steam_path
+            
         try:
             # Try both registry locations
             registry_paths = [
@@ -46,6 +54,8 @@ class SteamAchievementManager:
                     key = winreg.OpenKey(hkey, path)
                     install_path = winreg.QueryValueEx(key, "InstallPath")[0]
                     winreg.CloseKey(key)
+                    # Cache the path for future use
+                    SteamAchievementManager._cached_steam_path = install_path
                     return install_path
                 except (WindowsError, FileNotFoundError):
                     continue
@@ -55,6 +65,8 @@ class SteamAchievementManager:
 
             for path in common_paths:
                 if os.path.exists(os.path.join(path, "steamclient.dll")):
+                    # Cache the path for future use
+                    SteamAchievementManager._cached_steam_path = path
                     return path
 
             raise Exception("Could not find Steam installation")
@@ -72,39 +84,60 @@ class SteamAchievementManager:
             steam_path = self._get_steam_install_path()
             print(f"Found Steam at: {steam_path}")
 
-            # Use the working steam_api64.dll approach for better compatibility
-            dll_paths = [
-                os.path.join(
-                    os.getcwd(), "DLLs", "win64", "steam_api64.dll"
-                ),  # Our working DLL
-                os.path.join(
-                    steam_path, "steamclient64.dll"
-                ),  # Fallback to Steam's DLL
-                os.path.join(steam_path, "steamclient.dll"),  # 32-bit fallback
-            ]
+            # Use cached DLL path if available
+            if SteamAchievementManager._cached_dll_path:
+                dll_path = SteamAchievementManager._cached_dll_path
+                try:
+                    # Set DLL directory for proper loading
+                    if hasattr(ctypes.windll.kernel32, "SetDllDirectoryW"):
+                        if "DLLs" in dll_path:
+                            ctypes.windll.kernel32.SetDllDirectoryW(
+                                os.path.dirname(dll_path)
+                            )
+                        else:
+                            ctypes.windll.kernel32.SetDllDirectoryW(steam_path)
 
-            self.steamclient = None
-            for dll_path in dll_paths:
-                if os.path.exists(dll_path):
-                    try:
-                        # Set DLL directory for proper loading
-                        if hasattr(ctypes.windll.kernel32, "SetDllDirectoryW"):
-                            if "DLLs" in dll_path:
-                                ctypes.windll.kernel32.SetDllDirectoryW(
-                                    os.path.dirname(dll_path)
-                                )
-                            else:
-                                ctypes.windll.kernel32.SetDllDirectoryW(steam_path)
-
-                        self.steamclient = ctypes.CDLL(dll_path)
-                        print(f"Successfully loaded: {dll_path}")
-                        break
-                    except Exception as e:
-                        print(f"Failed to load {dll_path}: {e}")
-                        continue
-
+                    self.steamclient = ctypes.CDLL(dll_path)
+                    print(f"Using cached DLL: {dll_path}")
+                except Exception as e:
+                    print(f"Cached DLL failed: {e}, trying fallback")
+                    SteamAchievementManager._cached_dll_path = None  # Reset cache
+            
+            # If no cached path or cached path failed, try all paths
             if not self.steamclient:
-                raise Exception("Could not load any Steam DLL")
+                dll_paths = [
+                    os.path.join(
+                        os.getcwd(), "DLLs", "win64", "steam_api64.dll"
+                    ),  # Our working DLL
+                    os.path.join(
+                        steam_path, "steamclient64.dll"
+                    ),  # Fallback to Steam's DLL
+                    os.path.join(steam_path, "steamclient.dll"),  # 32-bit fallback
+                ]
+
+                for dll_path in dll_paths:
+                    if os.path.exists(dll_path):
+                        try:
+                            # Set DLL directory for proper loading
+                            if hasattr(ctypes.windll.kernel32, "SetDllDirectoryW"):
+                                if "DLLs" in dll_path:
+                                    ctypes.windll.kernel32.SetDllDirectoryW(
+                                        os.path.dirname(dll_path)
+                                    )
+                                else:
+                                    ctypes.windll.kernel32.SetDllDirectoryW(steam_path)
+
+                            self.steamclient = ctypes.CDLL(dll_path)
+                            print(f"Successfully loaded: {dll_path}")
+                            # Cache the successful path
+                            SteamAchievementManager._cached_dll_path = dll_path
+                            break
+                        except Exception as e:
+                            print(f"Failed to load {dll_path}: {e}")
+                            continue
+
+                if not self.steamclient:
+                    raise Exception("Could not load any Steam DLL")
 
             # Handle different DLL types
             if "steam_api64.dll" in dll_path:
@@ -346,15 +379,15 @@ class SteamAchievementManager:
                     raise Exception("RequestUserStats returned invalid call handle")
                 print(f"RequestUserStats call handle: {call_handle}")
 
-                # Wait for callback with RunCallbacks
+                # Wait for callback with RunCallbacks - optimized timing
                 if hasattr(self, "_run_callbacks_api") and self._run_callbacks_api:
                     print("Waiting for callback with RunCallbacks...")
-                    timeout = time.time() + 5.0
+                    timeout = time.time() + 3.0  # Reduced from 5.0 to 3.0 seconds
                     while time.time() < timeout:
                         self._run_callbacks_api()
-                        time.sleep(0.1)
+                        time.sleep(0.05)  # Reduced from 0.1 to 0.05 seconds
                 else:
-                    time.sleep(2)
+                    time.sleep(1.5)  # Reduced from 2 to 1.5 seconds
 
             # Use vtable function (steamclient64.dll)
             elif hasattr(self, "_request_user_stats"):
@@ -362,7 +395,7 @@ class SteamAchievementManager:
                 if not result:
                     raise Exception("Failed to request user stats")
                 print("User stats requested, waiting for callback...")
-                time.sleep(2)
+                time.sleep(1.5)  # Reduced from 2 to 1.5 seconds
             else:
                 print("Warning: No RequestUserStats function available")
 
@@ -519,15 +552,20 @@ def process_all_games():
             print(f"Skipping {game_name} (no achievements)")
             continue
 
-        # Only process games with unlocked achievements == 0 (locked achievements)
+        # Only process games with unlockable achievements (achieved: 0 and not protected)
         locked_achievements = [ach for ach in achievements if ach["achieved"] == 0]
+        unlockable_achievements = [ach for ach in locked_achievements if not ach.get("protected", False)]
+        protected_achievements = [ach for ach in locked_achievements if ach.get("protected", False)]
 
-        if not locked_achievements:
-            print(f"Skipping {game_name} (all achievements already unlocked)")
+        if not unlockable_achievements:
+            if not locked_achievements:
+                print(f"Skipping {game_name} (all achievements already unlocked)")
+            else:
+                print(f"Skipping {game_name} ({len(protected_achievements)} locked achievements are all protected)")
             continue
 
         print(f"[{i}/{len(games)}] Processing: {game_name} (App ID: {app_id})")
-        print(f"  Achievements to unlock: {len(locked_achievements)}")
+        print(f"  Achievements to unlock: {len(unlockable_achievements)} (skipping {len(protected_achievements)} protected)")
 
         manager = None
         try:
@@ -539,19 +577,18 @@ def process_all_games():
             if manager.request_user_stats(steam_id):
                 achievements_unlocked_this_game = 0
 
-                # Unlock all locked achievements for this game
-                for achievement in locked_achievements:
+                # Unlock all unlockable achievements for this game
+                for achievement in unlockable_achievements:
                     achievement_id = achievement["apiname"]
 
                     if manager.unlock_achievement(achievement_id):
                         achievements_unlocked_this_game += 1
                         total_achievements_unlocked += 1
 
-                    # Small delay between achievements
-                    time.sleep(0.1)
+                    # Removed delay between achievements for faster processing
 
                 print(
-                    f"  Successfully unlocked {achievements_unlocked_this_game}/{len(locked_achievements)} achievements"
+                    f"  Successfully unlocked {achievements_unlocked_this_game}/{len(unlockable_achievements)} achievements"
                 )
                 successful_games += 1
 
@@ -569,9 +606,9 @@ def process_all_games():
                 print(f"  Cleaning up Steam API for {game_name}...")
                 manager.cleanup()
                 
-        # Wait between games to allow Steam to fully reset
-        print(f"  Waiting 3 seconds for Steam to reset before next game...\n")
-        time.sleep(3)
+        # Wait between games to allow Steam to fully reset - optimized timing
+        print(f"  Waiting 1 second for Steam to reset before next game...\n")
+        time.sleep(1)  # Reduced from 3 to 1 second
 
     # Final summary
     print("=" * 50)
