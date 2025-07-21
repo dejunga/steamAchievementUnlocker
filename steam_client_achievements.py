@@ -20,7 +20,7 @@ class SteamAchievementManager:
     Steam Achievement Manager following the working C# implementation approach
     Uses steamclient.dll and proper Steam client interface hierarchy
     """
-    
+
     # Class-level cache for DLL path to avoid repeated searches
     _cached_dll_path = None
     _cached_steam_path = None
@@ -40,7 +40,7 @@ class SteamAchievementManager:
         # Use cached path if available
         if SteamAchievementManager._cached_steam_path:
             return SteamAchievementManager._cached_steam_path
-            
+
         try:
             # Try both registry locations
             registry_paths = [
@@ -102,21 +102,72 @@ class SteamAchievementManager:
                 except Exception as e:
                     print(f"Cached DLL failed: {e}, trying fallback")
                     SteamAchievementManager._cached_dll_path = None  # Reset cache
-            
+
             # If no cached path or cached path failed, try all paths
             if not self.steamclient:
-                dll_paths = [
-                    os.path.join(
-                        os.getcwd(), "DLLs", "win64", "steam_api64.dll"
-                    ),  # Our working DLL
-                    os.path.join(
-                        steam_path, "steamclient64.dll"
-                    ),  # Fallback to Steam's DLL
-                    os.path.join(steam_path, "steamclient.dll"),  # 32-bit fallback
-                ]
+                # Dynamic DLL search - works on any computer
+                dll_paths = []
+
+                # 1. Try current working directory first
+                current_dir = os.getcwd()
+                dll_paths.extend(
+                    [
+                        os.path.join(current_dir, "DLLs", "win64", "steam_api64.dll"),
+                        os.path.join(current_dir, "DLLs", "steam_api64.dll"),
+                        os.path.join(current_dir, "steam_api64.dll"),
+                    ]
+                )
+
+                # 2. Try executable directory (for PyInstaller)
+                if getattr(sys, "frozen", False):
+                    # PyInstaller bundle directory
+                    bundle_dir = getattr(
+                        sys, "_MEIPASS", os.path.dirname(sys.executable)
+                    )
+                    dll_paths.extend(
+                        [
+                            os.path.join(
+                                bundle_dir, "DLLs", "win64", "steam_api64.dll"
+                            ),
+                            os.path.join(bundle_dir, "DLLs", "steam_api64.dll"),
+                            os.path.join(bundle_dir, "steam_api64.dll"),
+                        ]
+                    )
+
+                    # Also try next to executable
+                    exe_dir = os.path.dirname(sys.executable)
+                    dll_paths.extend(
+                        [
+                            os.path.join(exe_dir, "DLLs", "win64", "steam_api64.dll"),
+                            os.path.join(exe_dir, "DLLs", "steam_api64.dll"),
+                            os.path.join(exe_dir, "steam_api64.dll"),
+                        ]
+                    )
+
+                # 3. Try script directory (for development)
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                dll_paths.extend(
+                    [
+                        os.path.join(script_dir, "DLLs", "win64", "steam_api64.dll"),
+                        os.path.join(script_dir, "DLLs", "steam_api64.dll"),
+                        os.path.join(script_dir, "steam_api64.dll"),
+                    ]
+                )
+
+                # 4. Try Steam installation directory
+                dll_paths.extend(
+                    [
+                        os.path.join(steam_path, "steamclient64.dll"),
+                        os.path.join(steam_path, "steamclient.dll"),
+                    ]
+                )
+
+                print(f"🔍 Searching for Steam DLLs in {len(dll_paths)} locations...")
 
                 for dll_path in dll_paths:
+                    print(f"  🔍 Checking: {dll_path}")
                     if os.path.exists(dll_path):
+                        print(f"  ✅ Found DLL: {dll_path}")
                         try:
                             # Set DLL directory for proper loading
                             if hasattr(ctypes.windll.kernel32, "SetDllDirectoryW"):
@@ -311,9 +362,7 @@ class SteamAchievementManager:
                 self._run_callbacks_api.restype = None
 
             # SteamAPI_Shutdown for cleanup
-            self._shutdown_api = getattr(
-                self.steamclient, "SteamAPI_Shutdown", None
-            )
+            self._shutdown_api = getattr(self.steamclient, "SteamAPI_Shutdown", None)
             if self._shutdown_api:
                 self._shutdown_api.restype = None
 
@@ -488,11 +537,11 @@ class SteamAchievementManager:
         """Cleanup Steam resources"""
         try:
             # For Steam API approach (steam_api64.dll)
-            if hasattr(self, '_shutdown_api') and self._shutdown_api:
+            if hasattr(self, "_shutdown_api") and self._shutdown_api:
                 print("Shutting down Steam API...")
                 self._shutdown_api()
                 print("Steam API shutdown complete")
-            
+
             # For Steam client approach (steamclient64.dll)
             if (
                 hasattr(self, "steam_pipe")
@@ -503,12 +552,12 @@ class SteamAchievementManager:
                 if hasattr(self, "_release_steam_pipe_func"):
                     self._release_steam_pipe_func(self.steam_client, self.steam_pipe)
                     print("Released Steam pipe")
-            
+
             # Clear environment variable
             if "SteamAppId" in os.environ:
                 del os.environ["SteamAppId"]
                 print("Cleared SteamAppId environment variable")
-                
+
         except Exception as e:
             print(f"Error during cleanup: {e}")
             pass
@@ -554,18 +603,26 @@ def process_all_games():
 
         # Only process games with unlockable achievements (achieved: 0 and not protected)
         locked_achievements = [ach for ach in achievements if ach["achieved"] == 0]
-        unlockable_achievements = [ach for ach in locked_achievements if not ach.get("protected", False)]
-        protected_achievements = [ach for ach in locked_achievements if ach.get("protected", False)]
+        unlockable_achievements = [
+            ach for ach in locked_achievements if not ach.get("protected", False)
+        ]
+        protected_achievements = [
+            ach for ach in locked_achievements if ach.get("protected", False)
+        ]
 
         if not unlockable_achievements:
             if not locked_achievements:
                 print(f"Skipping {game_name} (all achievements already unlocked)")
             else:
-                print(f"Skipping {game_name} ({len(protected_achievements)} locked achievements are all protected)")
+                print(
+                    f"Skipping {game_name} ({len(protected_achievements)} locked achievements are all protected)"
+                )
             continue
 
         print(f"[{i}/{len(games)}] Processing: {game_name} (App ID: {app_id})")
-        print(f"  Achievements to unlock: {len(unlockable_achievements)} (skipping {len(protected_achievements)} protected)")
+        print(
+            f"  Achievements to unlock: {len(unlockable_achievements)} (skipping {len(protected_achievements)} protected)"
+        )
 
         manager = None
         try:
@@ -605,7 +662,7 @@ def process_all_games():
             if manager:
                 print(f"  Cleaning up Steam API for {game_name}...")
                 manager.cleanup()
-                
+
         # Wait between games to allow Steam to fully reset - optimized timing
         print(f"  Waiting 1 second for Steam to reset before next game...\n")
         time.sleep(1)  # Reduced from 3 to 1 second
@@ -619,6 +676,15 @@ def process_all_games():
     print(f"Failed games: {failed_games}")
     print(f"Total achievements unlocked: {total_achievements_unlocked}")
     print("=" * 50)
+
+    # Keep program open until user closes it
+    try:
+        input("\nPress Enter to exit...")
+    except (EOFError, KeyboardInterrupt):
+        print("\nProgram closing...")
+    except Exception:
+        print("Waiting 10 seconds before closing...")
+        time.sleep(10)
 
 
 if __name__ == "__main__":
