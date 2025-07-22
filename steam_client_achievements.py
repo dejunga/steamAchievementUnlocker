@@ -660,12 +660,7 @@ def process_all_games():
         finally:
             # CRITICAL: Always cleanup Steam API completely for this game
             if manager:
-                print(f"  Cleaning up Steam API for {game_name}...")
                 manager.cleanup()
-
-        # Wait between games to allow Steam to fully reset - optimized timing
-        print(f"  Waiting 1 second for Steam to reset before next game...\n")
-        time.sleep(1)  # Reduced from 3 to 1 second
 
     # Final summary
     print("=" * 50)
@@ -688,45 +683,10 @@ def process_all_games():
 
 
 if __name__ == "__main__":
-    # Ask user what they want to do
-    print("Steam Achievement Unlocker")
-    print("1. Test single game (Beyond the Void)")
-    print("2. Process all games from data.json")
-    choice = input("Enter your choice (1 or 2): ").strip()
 
-    if choice == "1":
-        # Test with Beyond the Void
-        app_id = 700570
-        steam_id = "76561198195207346"
-        achievement_ids = [
-            "TURRET_BREAKER",
-            "TOWER_DESTROYER",
-        ]
-
-        try:
-            manager = SteamAchievementManager(app_id)
-
-            # Request user stats first (critical step)
-            if manager.request_user_stats(steam_id):
-                # Unlock achievements
-                for achievement_id in achievement_ids:
-                    manager.unlock_achievement(achievement_id)
-            else:
-                print("Failed to request user stats")
-
-        except Exception as e:
-            print(f"Error: {e}")
-        finally:
-            if "manager" in locals():
-                manager.cleanup()
-
-    elif choice == "2":
-        # Process all games
-        try:
-            process_all_games()
-        except KeyboardInterrupt:
-            print("\n\nBatch processing interrupted by user.")
-        except Exception as e:
-            print(f"Error in batch processing: {e}")
-    else:
-        print("Invalid choice. Please run again and select 1 or 2.")
+    try:
+        process_all_games()
+    except KeyboardInterrupt:
+        print("\n\nBatch processing interrupted by user.")
+    except Exception as e:
+        print(f"Error in batch processing: {e}")

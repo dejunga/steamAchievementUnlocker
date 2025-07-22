@@ -320,10 +320,9 @@ class SteamLauncher:
             return False
 
         try:
-            # Run steam_client_achievements.py with option 2 (process all games)
+            # Run steam_client_achievements.py directly
             result = subprocess.run(
                 [sys.executable, "steam_client_achievements.py"],
-                input="2\n",  # Automatically select option 2
                 capture_output=True,
                 text=True,
             )

@@ -13,6 +13,7 @@ from datetime import datetime
 # Try to load dotenv, but continue if not available
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     print("Note: python-dotenv not available, skipping .env file loading")
@@ -31,7 +32,7 @@ def log_print(message):
 
 def setup_steam_dlls():
     """Verify Steam DLLs are available (no copying needed)"""
-    
+
     def get_steam_path():
         """Get Steam installation path from registry"""
         try:
@@ -56,14 +57,14 @@ def setup_steam_dlls():
                 r"C:\Program Files\Steam",
                 r"C:\Steam",
             ]
-            
+
             for path in fallback_paths:
                 if os.path.exists(path):
                     return path
-                    
+
         except Exception as e:
             print(f"❌ Error finding Steam path: {e}")
-        
+
         return None
 
     steam_path = get_steam_path()
@@ -73,14 +74,14 @@ def setup_steam_dlls():
         return False
 
     print(f"🔍 Found Steam at: {steam_path}")
-    
+
     # Check if required DLLs exist in Steam installation
     required_dlls = [
         "vstdlib_s64.dll",
-        "tier0_s64.dll", 
+        "tier0_s64.dll",
         "steamclient64.dll",
     ]
-    
+
     success = True
     for dll_name in required_dlls:
         steam_dll_path = os.path.join(steam_path, dll_name)
@@ -89,10 +90,10 @@ def setup_steam_dlls():
         else:
             print(f"❌ Missing {dll_name} at {steam_dll_path}")
             success = False
-    
+
     if success:
         print(f"✅ All required Steam DLLs found in: {steam_path}")
-    
+
     return success
 
 
@@ -319,13 +320,6 @@ def process_single_game(
                             f"  ✓ Found {len(achievements)} achievements ({total_locked} locked)"
                         )
 
-                        # TESTING MODE: Stop after 50 games with locked achievements
-                        if len(games_with_achievements) >= 50:
-                            log_print(
-                                f"\n🧪 TEST MODE: Reached 50 games with locked achievements, stopping early..."
-                            )
-                            stop_processing.set()  # Signal all threads to stop
-                            return  # Exit this thread
                 else:
                     with lock:
                         log_print(
@@ -533,7 +527,7 @@ def main():
 
                     # Check if we should stop early
                     if stop_processing.is_set():
-                        log_print(f"\n🧪 Stopping early - reached 50 games limit")
+                        log_print(f"\n🛑 Stopping process as requested")
                         break
 
                     # Show progress every 5%
@@ -663,7 +657,9 @@ def main():
             # Verify Steam DLLs are available
             print("🔧 Verifying Steam DLLs...")
             if not setup_steam_dlls():
-                print("❌ Failed to find required Steam DLLs. Please ensure Steam is installed.")
+                print(
+                    "❌ Failed to find required Steam DLLs. Please ensure Steam is installed."
+                )
                 return
 
             print(
